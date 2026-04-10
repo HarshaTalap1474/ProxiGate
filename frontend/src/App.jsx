@@ -11,11 +11,13 @@ function App() {
   const [pinForm, setPinForm] = useState({ newPin: '', pinType: 'ADMIN' })
   
   const pendingRef = useRef('NONE')
+  const usersCountRef = useRef(0)
 
   const fetchUsers = async () => {
     try {
       const res = await axios.get(`${API_BASE}/users`)
       setUsers(res.data)
+      usersCountRef.current = res.data.length
     } catch (e) {
       console.error(e)
     }
@@ -25,8 +27,20 @@ function App() {
     try {
       const res = await axios.get(`${API_BASE}/system/status`)
       if (res.data.pendingCommand === 'NONE' && pendingRef.current !== 'NONE') {
-        // A command just finished, auto reload the table!
-        fetchUsers()
+        const wasEnroll = pendingRef.current.startsWith('ENROLL')
+        
+        // Fetch the fresh users list immediately
+        const usersRes = await axios.get(`${API_BASE}/users`)
+        setUsers(usersRes.data)
+        
+        if (wasEnroll) {
+          if (usersRes.data.length > usersCountRef.current) {
+            alert('Fingerprint Enrollment Successful! User added to database.')
+          } else {
+            alert('Enrollment Failed or Timed Out (Ensure finger matched twice cleanly).')
+          }
+        }
+        usersCountRef.current = usersRes.data.length
       }
       pendingRef.current = res.data.pendingCommand
       setStatus(res.data)
