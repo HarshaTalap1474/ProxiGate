@@ -54,12 +54,26 @@ npm run dev
 ```
 
 ### **3. Hardware Flashing & Wiring**
+
+#### **ESP32 DevKit (Smart Lock) Wiring Table**
+| Component | ESP32 Pin | Notes |
+| :--- | :--- | :--- |
+| **Solenoid / Servo** | `GPIO 13` | Use a relay/driver if powering a heavy 12V Solenoid! |
+| **AS608 Fingerprint** | `RX: 16`, `TX: 17` | Standard Hardware Serial 2 |
+| **16x2 I2C LCD** | `SDA: 21`, `SCL: 22` | Standard ESP32 I2C pins. Uses `0x27` address. |
+| **Keypad Rows (1-4)** | `32`, `33`, `25`, `26` | 4x3 Membrane Keypad |
+| **Keypad Cols (1-3)** | `27`, `14`, `12` | |
+
+#### **ESP32-CAM Wiring Table**
+| Component | ESP32-CAM Pin | Notes |
+| :--- | :--- | :--- |
+| **WiFi Reset Trigger** | `GPIO 13` | Hold this pin to `GND` during boot to flush the Captive Portal memory. |
+| **Power (Crucial)** | `5V` (or `Vin`) | **Must** provide a stable 2A power source! PC USBs drop voltage. |
+
+**Flashing Instructions:**
 1. Ensure the `WiFiManager` library (by tzapu) is installed via Arduino IDE Library Manager.
 2. Upload `hardware/ESP32_Lock/ESP32_Lock.ino` to your primary ESP32.
-3. Upload `hardware/ESP32_CAM/ESP32_CAM.ino` to your Camera module. 
-
-**ESP-CAM Wiring (Crucial for stability)**
-- Supply **stable 5V/2A** power (e.g. from the ESP32 Vin or external source). Do not rely solely on PC USB power when initializing the WiFi modem.
+3. Upload `hardware/ESP32_CAM/ESP32_CAM.ino` to your Camera module.
 
 ### **4. Headless WiFi Configuration (Captive Portal)**
 The ESP32s no longer use hardcoded WiFi passwords! On initial boot (or if moving routers):
