@@ -6,12 +6,10 @@
 #include <LiquidCrystal_I2C.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 
 // ------------------------- Configuration -------------------------
-const char *ssid = "Room_6_7";
-const char *password = "Suraj@123";
-const char *serverPollUrl = "http://192.168.0.112:8000/api/device/poll"; 
-const char *serverResultUrl = "http://192.168.0.112:8000/api/device/result"; 
+char serverIp[40] = "192.168.0.112";
 
 #define SERVO_PIN 13 
 #define FINGER_RX 16 
@@ -96,46 +94,46 @@ void updateDisplay() {
   switch (currentState) {
   case LOCKED:
     if (WiFi.status() == WL_CONNECTED) {
-      printRow(0, "Locked (Online)");
+      printRow(0, "  [ProxiGate]   ");
     } else {
-      printRow(0, "Locked (Offline)");
+      printRow(0, "!SYS OFFLINE!   ");
     }
     
     if (inputPin.length() > 0) {
-      printRow(1, "PIN: " + getMaskedPin(inputPin));
+      printRow(1, " PIN: " + getMaskedPin(inputPin));
     } else {
-      printRow(1, "Scan Finger/PIN");
+      printRow(1, "Scan or PIN...  ");
     }
     break;
 
   case UNLOCKED:
-    printRow(0, "Door Unlocked");
-    printRow(1, "");
+    printRow(0, " *Door Opened*  ");
+    printRow(1, "                ");
     break;
 
   case AWAITING_ADMIN_PIN:
-    printRow(0, "Admin ID 1-10");
-    printRow(1, inputPin.length() > 0 ? "PIN: " + getMaskedPin(inputPin) : "PIN + #:");
+    printRow(0, " Admin Access   ");
+    printRow(1, inputPin.length() > 0 ? "PIN:" + getMaskedPin(inputPin) : "PIN + #:        ");
     break;
 
   case ADMIN_MENU:
-    printRow(0, "1:Unlck 2:Add");
-    printRow(1, "3:Wipe *:Cancel");
+    printRow(0, "1:Opn 2:Add");
+    printRow(1, "3:Wip 4:WIFI *X");
     break;
 
   case ENROLL_WAIT_FIRST:
-    printRow(0, isOfflineEnrollment ? "Offline Enroll" : "Enroll Mode");
-    printRow(1, "Place finger...");
+    printRow(0, isOfflineEnrollment ? " Offline Enroll " : "  Enroll Mode   ");
+    printRow(1, " Place Finger   ");
     break;
 
   case ENROLL_WAIT_REMOVE:
-    printRow(0, "Remove finger");
-    printRow(1, "");
+    printRow(0, " Remove Finger  ");
+    printRow(1, "                ");
     break;
 
   case ENROLL_WAIT_SECOND:
-    printRow(0, "Place same");
-    printRow(1, "finger again...");
+    printRow(0, " Place Same     ");
+    printRow(1, " Finger Again   ");
     break;
   }
 }
@@ -193,6 +191,7 @@ void sendEnrollResult(int id, bool success) {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    String serverResultUrl = "http://" + String(serverIp) + ":8000/api/device/result";
     HTTPClient http;
     http.begin(serverResultUrl);
     http.addHeader("Content-Type", "application/json");
@@ -209,6 +208,7 @@ void pollServer() {
   if (millis() - lastHttpPoll >= HTTP_POLL_INTERVAL &&
       WiFi.status() == WL_CONNECTED) {
     lastHttpPoll = millis();
+    String serverPollUrl = "http://" + String(serverIp) + ":8000/api/device/poll";
     HTTPClient http;
     http.begin(serverPollUrl);
     int httpResponseCode = http.GET();
@@ -416,6 +416,12 @@ void handleKeypad() {
       prefs.putInt("off_target", 11);
       showTemporaryMessage("WIPE SUCCESS", "All IDs Cleared", 3500);
       resetToLocked();
+    } else if (key == '4') {
+      showTemporaryMessage("WIFI WIPE", "Restarting...", 3000);
+      WiFiManager wm;
+      wm.resetSettings();
+      delay(3000);
+      ESP.restart();
     } else if (key == '*') {
       showTemporaryMessage("Exiting...", "", 1500);
       resetToLocked();
@@ -433,6 +439,11 @@ void handleTimers() {
   if (currentState == UNLOCKED && millis() > unlockTimer) {
     resetToLocked();
   }
+}
+
+bool shouldSaveConfig = false;
+void saveConfigCallback () {
+  shouldSaveConfig = true;
 }
 
 // ------------------------- Setup & Loop -------------------------
@@ -455,19 +466,30 @@ void setup() {
   prefs.begin("proxigate", false);
   adminPin = prefs.getString("adminPin", adminPin); 
   userPin = prefs.getString("userPin", userPin); 
+  String savedIp = prefs.getString("serverIp", "192.168.0.112");
+  strcpy(serverIp, savedIp.c_str());
 
-  WiFi.begin(ssid, password);
-  Serial.print("[WiFi] Connecting");
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-  Serial.println("");
+  WiFiManagerParameter custom_server_ip("serverIp", "Backend IP", serverIp, 40);
+  WiFiManager wm;
+  wm.setSaveConfigCallback(saveConfigCallback);
+  wm.addParameter(&custom_server_ip);
+
+  printRow(0, "Connecting WiFi ");
+  printRow(1, "AP:ProxiGate-Lck");
+  Serial.print("[WiFi] Connecting via WiFiManager...");
   
-  wasConnected = (WiFi.status() == WL_CONNECTED);
+  if (!wm.autoConnect("ProxiGate-Lock")) {
+    Serial.println("Failed. Restarting...");
+    delay(3000);
+    ESP.restart();
+  }
 
+  if (shouldSaveConfig) {
+    strcpy(serverIp, custom_server_ip.getValue());
+    prefs.putString("serverIp", serverIp);
+  }
+  
+  wasConnected = true;
   resetToLocked();
 }
 

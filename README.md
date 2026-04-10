@@ -7,10 +7,10 @@ ProxiGate is a cutting-edge, IoT-enabled physical access control system that com
 ## 🌟 Key Features
 
 -   **Biometric Authentication**: Fingerprint recognition for secure physical access.
--   **Facial Monitoring**: Integrated ESP32-CAM for real-time video surveillance and facial snapshots.
--   **Remote Management**: Web-based dashboard to manage users, view logs, and monitor lock status.
--   **Real-time Alerts**: Instant updates on access attempts and system status via webhooks/sockets.
--   **Secure Credentials**: Hashed passwords and secure database models using FastAPI and SQLAlchemy.
+-   **Multi-Factor Fallbacks**: Multi-PIN configuration (Admin and User PINs) changeable natively on the dashboard and 16x2 Keypad module.
+-   **Remote Management**: Web-based dashboard to enroll users, revoke access, and monitor real-time module status tracking (Online/Offline badges).
+-   **Real-Time Video**: 180° rotated live stream from the ESP32-CAM on the Admin Dashboard.
+-   **No-Code Network Configuration**: Dynamic Captive Portals using `WiFiManager`. Never re-compile code to connect to new WiFi networks!
 
 ---
 
@@ -53,13 +53,26 @@ npm install
 npm run dev
 ```
 
-### **3. Hardware Configuration**
-1.  Open `hardware/ESP32_Lock/ESP32_Lock.ino` in the Arduino IDE.
-2.  Configure your WiFi credentials (`SSID`, `PASSWORD`) and the Backend API URL.
-3.  Upload the code to your ESP32.
-4.  Repeat for `hardware/ESP32_CAM/ESP32_CAM.ino`.
+### **3. Hardware Flashing & Wiring**
+1. Ensure the `WiFiManager` library (by tzapu) is installed via Arduino IDE Library Manager.
+2. Upload `hardware/ESP32_Lock/ESP32_Lock.ino` to your primary ESP32.
+3. Upload `hardware/ESP32_CAM/ESP32_CAM.ino` to your Camera module. 
 
----
+**ESP-CAM Wiring (Crucial for stability)**
+- Supply **stable 5V/2A** power (e.g. from the ESP32 Vin or external source). Do not rely solely on PC USB power when initializing the WiFi modem.
+
+### **4. Headless WiFi Configuration (Captive Portal)**
+The ESP32s no longer use hardcoded WiFi passwords! On initial boot (or if moving routers):
+1. Use your smartphone to connect to the newly created WiFi network (`ProxiGate-Lock` or `ProxiGate-Cam`).
+2. Navigate to `192.168.4.1` on your browser (if it doesn't automatically pop up).
+3. Type in your household WiFi credentials.
+4. Very importantly, under **Backend IP**, type the IPv4 address of the computer running your FastAPI backend (e.g., `192.168.0.112`).
+5. **Save** and the modules will reboot and hook into your local platform!
+
+### **5. Resetting WiFi Networks**
+If your IP address changes or you bring the system somewhere else, you can quickly wipe the saved configurations:
+- **For the Smart Lock**: Enter your Admin PIN + `#`, and press option `4` on the Keypad (`WIFI Wipe`). It will automatically erase its memory and trigger the setup portal.
+- **For the ESP-CAM**: Take a generic jumper wire and connect **Pin 13 to GND** while powering the module on. It immediately flushes its internal memory and triggers the setup portal.
 
 ## 📂 Project Structure
 

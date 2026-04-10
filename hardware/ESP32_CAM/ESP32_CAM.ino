@@ -9,9 +9,10 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 
-const char *ssid = "Room_6_7";
-const char *password = "Suraj@123";
-const char *serverUrl ="http://192.168.0.112:8000/api/device/cam_ip?ip=";
+#include <Preferences.h>
+#include <WiFiManager.h>
+
+char serverIp[40] = "192.168.0.112";
 
 #define PART_BOUNDARY "123456789000000000000987654321"
 
@@ -103,17 +104,22 @@ void startCameraServer() {
 
 void notifyServerOfIP(String ipStr) {
   HTTPClient http;
-  String fullUrl = String(serverUrl) + ipStr;
+  String fullUrl = "http://" + String(serverIp) + ":8000/api/device/cam_ip?ip=" + ipStr;
   http.begin(fullUrl);
-  int httpCode = http.GET(); // Our API registers via GET query param (or POST,
-                             // depending on implementation. In FastAPI we
-                             // defined: `@app.get("/api/device/cam_ip")`)
+  int httpCode = http.GET(); 
   if (httpCode > 0) {
     Serial.println("Registered IP with Backend: " + ipStr);
   } else {
-    Serial.println("Failed to register IP with Backend.");
+    Serial.println("Failed to register IP with Backend. URL: " + fullUrl + " Error: " + http.errorToString(httpCode));
   }
   http.end();
+}
+
+#define WIFI_RESET_PIN 13 // Connect GPIO 13 to GND during boot to wipe WiFi
+
+bool shouldSaveConfigCam = false;
+void saveConfigCallbackCam () {
+  shouldSaveConfigCam = true;
 }
 
 void setup() {
@@ -122,6 +128,16 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
+  
+  // Check if user wants to reset WiFi credentials
+  pinMode(WIFI_RESET_PIN, INPUT_PULLUP);
+  if (digitalRead(WIFI_RESET_PIN) == LOW) {
+    Serial.println("WiFi Reset Pin activated! Erasing saved networks...");
+    WiFiManager wm;
+    wm.resetSettings();
+    delay(1000);
+    Serial.println("WiFi Data Erased. Starting normal boot into Captive Portal...");
+  }
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -146,31 +162,59 @@ void setup() {
   config.pixel_format = PIXFORMAT_JPEG;
 
   if (psramFound()) {
-    config.frame_size =
-        FRAMESIZE_VGA;        // Lowered from UXGA to VGA for smoother framerate
-    config.jpeg_quality = 12; // Lowered quality to reduce frame size (higher
-                              // number = lower quality)
+    config.frame_size = FRAMESIZE_QVGA; 
+    config.jpeg_quality = 20; 
     config.fb_count = 2;
   } else {
-    config.frame_size = FRAMESIZE_CIF; // Lowered from SVGA
-    config.jpeg_quality = 15;
+    config.frame_size = FRAMESIZE_QVGA; 
+    config.jpeg_quality = 25;
     config.fb_count = 1;
   }
+  
+  // Decrease WiFi transmit power to prevent 500mA USB power spikes which cause the "wifi:Set status to INIT" panic!
+  WiFi.mode(WIFI_STA); 
+  WiFi.disconnect();
+  delay(100);
+  WiFi.setTxPower(WIFI_POWER_11dBm); // Lowers max power spike from ~700mA down to ~300mA
 
+  // Connect to WiFi via WiFiManager
+  Preferences prefs;
+  prefs.begin("proxigate", false);
+  String savedIp = prefs.getString("serverIp", "192.168.0.112");
+  strcpy(serverIp, savedIp.c_str());
+
+  WiFiManagerParameter custom_server_ip("serverIp", "Backend IP", serverIp, 40);
+  WiFiManager wm;
+  wm.setSaveConfigCallback(saveConfigCallbackCam);
+  wm.addParameter(&custom_server_ip);
+
+  Serial.println("Connecting to WiFi via Captive Portal...");
+  if (!wm.autoConnect("ProxiGate-Cam")) {
+    Serial.println("Failed to connect. Restarting...");
+    delay(3000);
+    ESP.restart();
+  }
+  
+  if (shouldSaveConfigCam) {
+    strcpy(serverIp, custom_server_ip.getValue());
+    prefs.putString("serverIp", serverIp);
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");
+  
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-
-  // Connect to WiFi
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  
+  // Rotate the camera stream 180 degrees
+  sensor_t * s = esp_camera_sensor_get();
+  if (s != NULL) {
+    s->set_vflip(s, 1);   // flip vertically
+    s->set_hmirror(s, 1); // mirror horizontally
   }
-  Serial.println("");
-  Serial.println("WiFi connected");
 
   Serial.print("Camera Stream Ready! Go to: http://");
   String localIp = WiFi.localIP().toString();
