@@ -8,11 +8,10 @@
 #include "soc/soc.h"          // disable brownout problems
 #include <HTTPClient.h>
 #include <WiFi.h>
-
-#include <Preferences.h>
-#include <WiFiManager.h>
 #include "esp_wifi.h"
 
+const char *ssid = "Room_6_7";
+const char *password = "Suraj@123";
 char serverIp[40] = "192.168.0.112";
 
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -107,8 +106,8 @@ void notifyServerOfIP(String ipStr) {
   HTTPClient http;
   String fullUrl = "http://" + String(serverIp) + ":8000/api/device/cam_ip?ip=" + ipStr;
   
-  http.setReuse(false);     // Disable connection keep-alive pooling to prevent socket exhaustion
-  http.setTimeout(15000);   // Massive 15 second timeout to penetrate congested WiFi buffers during stream
+  http.setReuse(false);     
+  http.setTimeout(15000);   
   http.begin(fullUrl);
   
   int httpCode = http.GET(); 
@@ -120,22 +119,7 @@ void notifyServerOfIP(String ipStr) {
   http.end();
 }
 
-#define WIFI_RESET_PIN 13 // Connect GPIO 13 to GND during boot to wipe WiFi
-
-bool shouldSaveConfigCam = false;
-void saveConfigCallbackCam () {
-  shouldSaveConfigCam = true;
-}
-
-// RTOS Task for Background Heartbeat Ping
-void heartbeatTaskLoop(void * pvParameters) {
-  for (;;) {
-    vTaskDelay(30000 / portTICK_PERIOD_MS); // Dialed back to 30 seconds to prevent starving the MJPEG bandwidth
-    if (WiFi.status() == WL_CONNECTED) {
-      notifyServerOfIP(WiFi.localIP().toString());
-    }
-  }
-}
+// Deleted heartbeatTaskLoop to prevent TCP connection refuse spam during heavy MJPEG streaming
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // Disable brownout detector
@@ -143,16 +127,6 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
-  
-  // Check if user wants to reset WiFi credentials
-  pinMode(WIFI_RESET_PIN, INPUT_PULLUP);
-  if (digitalRead(WIFI_RESET_PIN) == LOW) {
-    Serial.println("WiFi Reset Pin activated! Erasing saved networks...");
-    WiFiManager wm;
-    wm.resetSettings();
-    delay(1000);
-    Serial.println("WiFi Data Erased. Starting normal boot into Captive Portal...");
-  }
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -175,20 +149,14 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  config.fb_location = CAMERA_FB_IN_PSRAM;
-  config.jpeg_quality = 12;
-  config.fb_count = 1;
 
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_VGA; 
-    config.jpeg_quality = 10; 
+    config.frame_size = FRAMESIZE_QVGA; 
+    config.jpeg_quality = 20; 
     config.fb_count = 2;
-    config.grab_mode = CAMERA_GRAB_LATEST; // CRITICAL: This drops old frames instead of lagging
   } else {
-    config.frame_size = FRAMESIZE_SVGA; 
-    config.fb_location = CAMERA_FB_IN_DRAM;
-    config.jpeg_quality = 12;
+    config.frame_size = FRAMESIZE_QVGA; 
+    config.jpeg_quality = 25;
     config.fb_count = 1;
   }
   
@@ -201,45 +169,25 @@ void setup() {
   // Rotate the camera stream 180 degrees immediately after INIT
   sensor_t * s = esp_camera_sensor_get();
   if (s != NULL) {
-    delay(100); // Give the SCCB bus a moment
-    s->set_vflip(s, 1);   // flip vertically
+    delay(100); 
+    s->set_vflip(s, 1);   
     delay(100);
-    s->set_hmirror(s, 1); // mirror horizontally
+    s->set_hmirror(s, 1); 
     delay(100);
   }
 
-  // Decrease WiFi transmit power just in case
+  // Connect to WiFi Hardcoded
   WiFi.mode(WIFI_STA); 
   WiFi.disconnect();
   delay(100);
   WiFi.setTxPower(WIFI_POWER_11dBm);
 
-  // Connect to WiFi via WiFiManager
-  Preferences prefs;
-  prefs.begin("proxigate", false);
-  String savedIp = prefs.getString("serverIp", "192.168.0.112");
-  strcpy(serverIp, savedIp.c_str());
-
-  WiFiManagerParameter custom_server_ip("serverIp", "Backend IP", serverIp, 40);
-  WiFiManager wm;
-  wm.setSaveConfigCallback(saveConfigCallbackCam);
-  wm.addParameter(&custom_server_ip);
-
-  Serial.println("Connecting to WiFi via Captive Portal...");
-  if (!wm.autoConnect("ProxiGate-Cam")) {
-    Serial.println("Failed to connect. Restarting...");
-    delay(3000);
-    ESP.restart();
-  }
+  Serial.println("Connecting to classic hardcoded WiFi...");
+  WiFi.begin(ssid, password);
   
-  // CRITICAL FIX: WiFiManager often leaves the chip in WIFI_AP_STA mode. 
-  // The AP beacon interrupts the WiFi radio drastically, causing severe MJPEG lag.
-  // We strictly force it back to pure Station mode here:
-  WiFi.mode(WIFI_STA); 
-
-  if (shouldSaveConfigCam) {
-    strcpy(serverIp, custom_server_ip.getValue());
-    prefs.putString("serverIp", serverIp);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
 
   Serial.println("");
@@ -256,20 +204,10 @@ void setup() {
   // Disable WiFi Power Save Mode immediately (Crucial for lag-free ESP32-CAM streams)
   esp_wifi_set_ps(WIFI_PS_NONE);
 
-  // Spawn the Heartbeat task precisely onto Core 0 (App Core) to separate it from the camera stream processes
-  xTaskCreatePinnedToCore(
-    heartbeatTaskLoop,
-    "HeartbeatTask",
-    4096,
-    NULL,
-    1,
-    NULL,
-    0
-  );
+  // Heartbeat Task has been nuked here so the ESP32 doesn't fight its own WiFi driver anymore!
 }
 
 void loop() {
-  // FreeRTOS loop handles everything in the background!
   // Keeping the main Arduino loop completely empty prevents any lock-ups.
   delay(1000);
 }
