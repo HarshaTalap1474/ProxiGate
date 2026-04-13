@@ -40,9 +40,9 @@ Navigate to the `backend` directory:
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\\Scripts\\activate
+Windows: venv\\Scripts\\activate #source venv/bin/activate for linux
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload  #uvicorn main:app --reload
 ```
 
 ### **2. Frontend Setup**
