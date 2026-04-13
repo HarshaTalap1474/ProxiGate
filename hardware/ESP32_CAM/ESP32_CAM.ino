@@ -144,14 +144,27 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
   
-  // Check if user wants to reset WiFi credentials
+  // Check if user wants to reset WiFi credentials (Hold for 3 seconds at boot)
   pinMode(WIFI_RESET_PIN, INPUT_PULLUP);
   if (digitalRead(WIFI_RESET_PIN) == LOW) {
-    Serial.println("WiFi Reset Pin activated! Erasing saved networks...");
-    WiFiManager wm;
-    wm.resetSettings();
-    delay(1000);
-    Serial.println("WiFi Data Erased. Starting normal boot into Captive Portal...");
+    Serial.println("Reset pin detected LOW at boot. Hold for 3 seconds to erase WiFi...");
+    bool holdValid = true;
+    for (int i = 0; i < 30; i++) { // Check every 100ms for 3 seconds
+      delay(100);
+      if (digitalRead(WIFI_RESET_PIN) == HIGH) {
+        Serial.println("Button released early. WiFi reset aborted.");
+        holdValid = false;
+        break;
+      }
+    }
+    
+    if (holdValid) {
+      Serial.println("3 second hold successful! Erasing saved networks...");
+      WiFiManager wm;
+      wm.resetSettings();
+      delay(1000);
+      Serial.println("WiFi Data Erased. Starting normal boot into Captive Portal...");
+    }
   }
 
   camera_config_t config;
