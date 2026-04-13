@@ -120,7 +120,7 @@ void notifyServerOfIP(String ipStr) {
   http.end();
 }
 
-#define WIFI_RESET_PIN 13 // Connect GPIO 13 to GND during boot to wipe WiFi
+#define WIFI_RESET_PIN 13 // Hold GPIO 13 to GND for 3 seconds anytime to wipe WiFi
 
 bool shouldSaveConfigCam = false;
 void saveConfigCallbackCam () {
@@ -144,28 +144,8 @@ void setup() {
   Serial.setDebugOutput(true);
   Serial.println();
   
-  // Check if user wants to reset WiFi credentials (Hold for 3 seconds at boot)
+  // Initialize the reset pin
   pinMode(WIFI_RESET_PIN, INPUT_PULLUP);
-  if (digitalRead(WIFI_RESET_PIN) == LOW) {
-    Serial.println("Reset pin detected LOW at boot. Hold for 3 seconds to erase WiFi...");
-    bool holdValid = true;
-    for (int i = 0; i < 30; i++) { // Check every 100ms for 3 seconds
-      delay(100);
-      if (digitalRead(WIFI_RESET_PIN) == HIGH) {
-        Serial.println("Button released early. WiFi reset aborted.");
-        holdValid = false;
-        break;
-      }
-    }
-    
-    if (holdValid) {
-      Serial.println("3 second hold successful! Erasing saved networks...");
-      WiFiManager wm;
-      wm.resetSettings();
-      delay(1000);
-      Serial.println("WiFi Data Erased. Starting normal boot into Captive Portal...");
-    }
-  }
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -282,7 +262,35 @@ void setup() {
 }
 
 void loop() {
-  // FreeRTOS loop handles everything in the background!
-  // Keeping the main Arduino loop completely empty prevents any lock-ups.
-  delay(1000);
+  // Check if reset button is pressed
+  if (digitalRead(WIFI_RESET_PIN) == LOW) {
+    int holdTime = 0;
+    
+    // Wait until the pin is released or 3 seconds have passed
+    while (digitalRead(WIFI_RESET_PIN) == LOW) {
+      delay(100);
+      holdTime += 100;
+      
+      if (holdTime >= 3000) {
+        Serial.println("\n[RESET] Pin 13 held for 3 seconds! Erasing saved networks...");
+        
+        // 1. Wipe WiFi credentials
+        WiFiManager wm;
+        wm.resetSettings();
+        
+        // 2. Wipe the custom backend server IP
+        Preferences prefs;
+        prefs.begin("proxigate", false);
+        prefs.clear();
+        prefs.end();
+
+        Serial.println("[RESET] Device completely wiped. Restarting in 2 seconds...");
+        delay(2000);
+        ESP.restart(); // Reboot so the Captive Portal comes back up!
+      }
+    }
+  }
+
+  // Small delay to prevent watchdog panic, but keeps polling responsive
+  delay(100);
 }
